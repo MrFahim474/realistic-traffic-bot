@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 """
-Realistic Traffic Bot - Main Program
-Simulates genuine human traffic to YOUR website
+Realistic Traffic Bot - Requests-based version
+Works perfectly in Termux without browser drivers
 """
 
 import sys
 import time
 import random
+import requests
 from datetime import datetime
 from config import *
 from proxy_manager import ProxyManager
-from browser_manager import BrowserManager
 from human_behavior import HumanBehavior
 
 class RealisticTrafficBot:
@@ -25,6 +25,7 @@ class RealisticTrafficBot:
             'total_time': 0,
             'start_time': None,
             'end_time': None,
+            'status_codes': {},
         }
         self.log_file = None
         
@@ -46,12 +47,12 @@ class RealisticTrafficBot:
     def setup(self):
         """Initialize the bot"""
         print("\n" + "="*70)
-        print("🤖 REALISTIC TRAFFIC BOT - ADVANCED HUMAN SIMULATION")
+        print("🤖 REALISTIC TRAFFIC BOT - LIGHTWEIGHT VERSION")
         print("="*70)
         print(f"\n🎯 Target Website: {TARGET_WEBSITE}")
         print(f"📊 Planned Visits: {TOTAL_VISITS}")
         print(f"🌐 Use Proxies: {USE_PROXIES}")
-        print(f"🧠 Human Behavior: Scrolling, Reading, Clicking")
+        print(f"🧠 Human Behavior: Realistic timing and patterns")
         print("="*70)
         
         # Warning
@@ -78,6 +79,45 @@ class RealisticTrafficBot:
         
         self.log("\n✅ Setup complete! Starting visits...\n")
     
+    def generate_realistic_headers(self):
+        """Generate realistic browser headers"""
+        
+        user_agent = random.choice(USER_AGENTS)
+        
+        # Random accept language
+        languages = [
+            'en-US,en;q=0.9',
+            'en-GB,en;q=0.9',
+            'en-US,en;q=0.9,es;q=0.8',
+            'en-CA,en;q=0.9,fr;q=0.8',
+        ]
+        
+        headers = {
+            'User-Agent': user_agent,
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+            'Accept-Language': random.choice(languages),
+            'Accept-Encoding': 'gzip, deflate, br',
+            'DNT': '1',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1',
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'none',
+            'Sec-Fetch-User': '?1',
+            'Cache-Control': 'max-age=0',
+        }
+        
+        # Randomly add referer (30% chance)
+        if random.random() < 0.3:
+            referers = [
+                'https://www.google.com/',
+                'https://www.bing.com/',
+                'https://duckduckgo.com/',
+            ]
+            headers['Referer'] = random.choice(referers)
+        
+        return headers
+    
     def simulate_visit(self, visit_number):
         """Simulate one complete website visit"""
         self.log(f"\n{'='*70}")
@@ -86,9 +126,15 @@ class RealisticTrafficBot:
         
         # Get proxy (if enabled)
         proxy = None
+        proxy_dict = None
+        
         if USE_PROXIES and self.proxy_manager.working_proxies:
             proxy = self.proxy_manager.get_random_proxy()
             if proxy:
+                proxy_dict = {
+                    'http': proxy['http'],
+                    'https': proxy['https']
+                }
                 self.log(f"🌐 Using proxy: {proxy['proxy_string'][:30]}...")
                 self.stats['by_proxy'] += 1
             else:
@@ -99,64 +145,98 @@ class RealisticTrafficBot:
             self.stats['by_direct'] += 1
         
         # Select random page
-        if TARGET_PAGES:
+        if TARGET_PAGES and len(TARGET_PAGES) > 0:
             page = random.choice(TARGET_PAGES)
-            full_url = TARGET_WEBSITE.rstrip('/') + page
+            # Fix double slash issue
+            base = TARGET_WEBSITE.rstrip('/')
+            page_clean = page if page.startswith('/') else '/' + page
+            full_url = base + page_clean
         else:
             full_url = TARGET_WEBSITE
         
         self.log(f"📄 Target page: {full_url}")
         
-        # Create browser
-        browser_manager = BrowserManager(proxy=proxy)
-        driver = browser_manager.create_driver()
-        
-        if not driver:
-            self.log(f"❌ Failed to create browser")
-            self.stats['failed'] += 1
-            return False
+        # Generate realistic headers
+        headers = self.generate_realistic_headers()
         
         try:
-            # Visit website
-            self.log(f"🌍 Loading website...")
+            # Human behavior simulation BEFORE request
+            human = HumanBehavior()
+            
+            # Make request
+            self.log(f"🌍 Sending request...")
             start_time = time.time()
             
-            driver.get(full_url)
+            session = requests.Session()
             
-            load_time = time.time() - start_time
-            self.log(f"✅ Page loaded in {load_time:.2f}s")
+            response = session.get(
+                full_url,
+                headers=headers,
+                proxies=proxy_dict,
+                timeout=30,
+                allow_redirects=True,
+                verify=True
+            )
             
-            # Human behavior simulation
-            human = HumanBehavior(driver)
-            human.human_page_interaction()
+            request_time = time.time() - start_time
             
-            # Calculate time spent
-            total_time = time.time() - start_time
-            self.stats['total_time'] += total_time
+            # Log response
+            status_code = response.status_code
+            self.stats['status_codes'][status_code] = self.stats['status_codes'].get(status_code, 0) + 1
             
-            self.log(f"⏱️  Total visit duration: {total_time:.2f}s")
-            self.log(f"✅ Visit #{visit_number} completed successfully!")
+            self.log(f"✅ Response received: Status {status_code} in {request_time:.2f}s")
+            self.log(f"📦 Content size: {len(response.content)} bytes")
             
-            self.stats['successful'] += 1
+            if status_code == 200:
+                # Simulate human reading/interaction time
+                behavior_time = human.simulate_page_visit()
+                
+                # Calculate total time
+                total_time = request_time + behavior_time
+                self.stats['total_time'] += total_time
+                
+                self.log(f"⏱️  Total visit duration: {total_time:.2f}s")
+                self.log(f"✅ Visit #{visit_number} completed successfully!")
+                
+                self.stats['successful'] += 1
+                
+                # Close session
+                session.close()
+                
+                return True
+            else:
+                self.log(f"⚠️  Non-200 status code: {status_code}")
+                self.stats['failed'] += 1
+                session.close()
+                return False
             
-            # Close browser
-            browser_manager.close_driver()
-            
-            return True
-            
-        except Exception as e:
-            error_msg = str(e)[:100]
-            self.log(f"❌ Visit failed: {error_msg}")
+        except requests.exceptions.ProxyError as e:
+            self.log(f"❌ Proxy error: {str(e)[:80]}")
             
             # Mark proxy as failed
             if proxy:
                 self.proxy_manager.mark_proxy_failed(proxy)
             
             self.stats['failed'] += 1
+            return False
             
-            # Close browser
-            browser_manager.close_driver()
+        except requests.exceptions.Timeout:
+            self.log(f"❌ Request timeout after 30s")
             
+            if proxy:
+                self.proxy_manager.mark_proxy_failed(proxy)
+            
+            self.stats['failed'] += 1
+            return False
+            
+        except requests.exceptions.RequestException as e:
+            error_msg = str(e)[:100]
+            self.log(f"❌ Request failed: {error_msg}")
+            
+            if proxy:
+                self.proxy_manager.mark_proxy_failed(proxy)
+            
+            self.stats['failed'] += 1
             return False
     
     def run(self):
@@ -182,6 +262,15 @@ class RealisticTrafficBot:
         """Show final statistics"""
         duration = (self.stats['end_time'] - self.stats['start_time']).total_seconds()
         
+        # Avoid division by zero
+        avg_visit_time = 0
+        if self.stats['successful'] > 0:
+            avg_visit_time = self.stats['total_time'] / self.stats['successful']
+        
+        success_rate = 0
+        if self.stats['total_visits'] > 0:
+            success_rate = (self.stats['successful'] / self.stats['total_visits']) * 100
+        
         report = f"""
 
 {'='*70}
@@ -194,15 +283,22 @@ class RealisticTrafficBot:
    • Total Visits Attempted: {self.stats['total_visits']}
    • Successful: {self.stats['successful']} ✅
    • Failed: {self.stats['failed']} ❌
-   • Success Rate: {(self.stats['successful']/self.stats['total_visits']*100):.1f}%
+   • Success Rate: {success_rate:.1f}%
 
 🌐 CONNECTION STATISTICS:
    • Via Proxy: {self.stats['by_proxy']}
    • Direct Connection: {self.stats['by_direct']}
 
+📡 HTTP STATUS CODES:
+"""
+        
+        for status, count in sorted(self.stats['status_codes'].items()):
+            report += f"   • {status}: {count} times\n"
+        
+        report += f"""
 ⏱️  TIME STATISTICS:
    • Total Time on Site: {self.stats['total_time']/60:.1f} minutes
-   • Average Visit Duration: {self.stats['total_time']/self.stats['successful']:.1f}s
+   • Average Visit Duration: {avg_visit_time:.1f}s
    
 💾 Detailed logs saved to: {LOG_FILE}
 
@@ -235,6 +331,8 @@ def main():
         sys.exit(0)
     except Exception as e:
         print(f"\n❌ Fatal error: {str(e)}")
+        import traceback
+        traceback.print_exc()
         sys.exit(1)
 
 if __name__ == "__main__":
